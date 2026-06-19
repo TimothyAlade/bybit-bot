@@ -1,0 +1,7 @@
+name = "bybit-bot"
+main = "worker.js"
+compatibility_date = "2026-06-18"
+
+[[kv_namespaces]]
+binding = "PREDICTIONS"
+id = "0700d89ace064054baa748de9e6827da"
