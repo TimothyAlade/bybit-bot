@@ -1,5 +1,6 @@
 // ============================================================
 // BYBIT SMART BOT - CLOUDFLARE WORKER
+// Worker URL: https://bybitbot.aladetimothyolarewaju.workers.dev
 // ============================================================
 
 const BYBIT_API = "https://api.bybit.com";
@@ -14,17 +15,26 @@ const corsHeaders = {
 };
 
 function json(data) {
-    return new Response(JSON.stringify(data), {
-        headers: { "Content-Type": "application/json", ...corsHeaders }
-    });
+    try {
+        return new Response(JSON.stringify(data), {
+            headers: { 
+                "Content-Type": "application/json; charset=utf-8",
+                ...corsHeaders 
+            }
+        });
+    } catch (e) {
+        return new Response(JSON.stringify({ error: "JSON serialization error: " + e.message }), {
+            headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders }
+        });
+    }
 }
 
 // ============================================================
 // BYBIT API HELPERS
 // ============================================================
 async function getKlines(symbol, interval, limit) {
-    const url = `${BYBIT_API}/v5/market/kline?category=spot&symbol=${symbol}USDT&interval=${interval}&limit=${limit}`;
     try {
+        const url = `${BYBIT_API}/v5/market/kline?category=spot&symbol=${symbol}USDT&interval=${interval}&limit=${limit}`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.retCode !== 0) return null;
@@ -40,8 +50,8 @@ async function getKlines(symbol, interval, limit) {
 }
 
 async function getTicker(symbol) {
-    const url = `${BYBIT_API}/v5/market/tickers?category=spot&symbol=${symbol}USDT`;
     try {
+        const url = `${BYBIT_API}/v5/market/tickers?category=spot&symbol=${symbol}USDT`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.retCode !== 0) return null;
@@ -94,7 +104,7 @@ function calcBB(prices, period = 20, std = 2) {
 }
 
 // ============================================================
-// ENHANCED SIGNAL GENERATOR (Confluence Strategy)
+// ENHANCED SIGNAL GENERATOR - Confluence Strategy
 // ============================================================
 function generateSignal(symbol, candles, ticker) {
     if (!candles || candles.length < 50) {
@@ -206,7 +216,7 @@ function generateSignal(symbol, candles, ticker) {
         confluence++;
     }
 
-    // Determine signal and confidence
+    // Determine signal
     let signal = 'HOLD';
     let confidence = 0;
 
@@ -224,7 +234,7 @@ function generateSignal(symbol, candles, ticker) {
         confidence = Math.min(85, Math.abs(score) + confluence * 4);
     }
 
-    // TP/SL levels
+    // TP/SL
     let tp = null, sl = null;
     const atr = (candles[candles.length - 1].high - candles[candles.length - 1].low) / 2;
 
@@ -254,7 +264,7 @@ function generateSignal(symbol, candles, ticker) {
 }
 
 // ============================================================
-// COINS LIST
+// COINS LIST - 41 Top Coins
 // ============================================================
 const COINS = [
     'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE', 'ADA', 'AVAX', 'DOT', 'LINK',
@@ -269,114 +279,193 @@ const COINS = [
 export default {
     // Runs every minute 24/7
     async scheduled(event, env, ctx) {
-        const results = [];
-        for (const coin of COINS) {
-            const [candles, ticker] = await Promise.all([
-                getKlines(coin, '15m', 150),
-                getTicker(coin)
-            ]);
-            if (candles && ticker) {
-                results.push(generateSignal(coin, candles, ticker));
+        try {
+            const results = [];
+            for (const coin of COINS) {
+                try {
+                    const [candles, ticker] = await Promise.all([
+                        getKlines(coin, '15m', 150),
+                        getTicker(coin)
+                    ]);
+                    if (candles && ticker) {
+                        results.push(generateSignal(coin, candles, ticker));
+                    }
+                } catch (e) {
+                    // Skip failed coins
+                }
             }
+            await env.PREDICTIONS.put('latest_scan', JSON.stringify(results), { expirationTtl: 120 });
+        } catch (e) {
+            // Silent fail for scheduled task
         }
-        await env.PREDICTIONS.put('latest_scan', JSON.stringify(results), { expirationTtl: 120 });
     },
 
     async fetch(request, env, ctx) {
-        const url = new URL(request.url);
+        try {
+            const url = new URL(request.url);
 
-        // CORS preflight
-        if (request.method === "OPTIONS") {
-            return new Response(null, { headers: corsHeaders });
-        }
-
-        // ============================================
-        // API: Scan All Coins
-        // ============================================
-        if (url.pathname === "/api/scanall" && request.method === "POST") {
-            try {
-                const cached = await env.PREDICTIONS.get('latest_scan');
-                const data = cached ? JSON.parse(cached) : [];
-                return json({ data: data });
-            } catch (e) {
-                return json({ error: e.message });
-            }
-        }
-
-        // ============================================
-        // API: Get Balance
-        // ============================================
-        if (url.pathname === "/api/balance") {
-            try {
-                const chatId = url.searchParams.get("chatId");
-                const bal = await env.PREDICTIONS.get(`balance:${chatId}`);
-                const today = new Date().toDateString();
-                const trades = await env.PREDICTIONS.get(`tradecount:${chatId}:${today}`);
-                return json({
-                    balance: parseFloat(bal || START_BALANCE).toFixed(2),
-                    tradesToday: parseInt(trades || "0")
+            // CORS preflight
+            if (request.method === "OPTIONS") {
+                return new Response(null, { 
+                    status: 204,
+                    headers: corsHeaders 
                 });
-            } catch (e) {
-                return json({ error: e.message });
             }
-        }
 
-        // ============================================
-        // API: Execute Trade (Paper Trading)
-        // ============================================
-        if (url.pathname === "/api/trade" && request.method === "POST") {
-            try {
-                const body = await request.json();
-                const { symbol, signal, price, chatId } = body;
-                const today = new Date().toDateString();
-                const countKey = `tradecount:${chatId}:${today}`;
-                const count = parseInt(await env.PREDICTIONS.get(countKey) || "0");
+            // ============================================
+            // API: Test endpoint
+            // ============================================
+            if (url.pathname === "/api/test" && request.method === "GET") {
+                return json({ 
+                    status: "ok", 
+                    message: "Worker is running!",
+                    timestamp: Date.now(),
+                    kv_exists: !!env.PREDICTIONS,
+                    coins_count: COINS.length
+                });
+            }
 
-                if (count >= 10) {
-                    return json({ error: "Daily limit reached (10 trades)" });
+            // ============================================
+            // API: Scan All Coins
+            // ============================================
+            if (url.pathname === "/api/scanall" && request.method === "POST") {
+                try {
+                    const cached = await env.PREDICTIONS.get('latest_scan');
+                    const data = cached ? JSON.parse(cached) : [];
+                    
+                    // If no cached data, generate it now
+                    if (data.length === 0) {
+                        const results = [];
+                        for (const coin of COINS.slice(0, 10)) {
+                            try {
+                                const [candles, ticker] = await Promise.all([
+                                    getKlines(coin, '15m', 150),
+                                    getTicker(coin)
+                                ]);
+                                if (candles && ticker) {
+                                    results.push(generateSignal(coin, candles, ticker));
+                                }
+                            } catch (e) {}
+                        }
+                        return json({ data: results });
+                    }
+                    
+                    return json({ data: data });
+                } catch (e) {
+                    return json({ error: "Failed to get scan data: " + e.message });
                 }
+            }
 
-                let balance = parseFloat(await env.PREDICTIONS.get(`balance:${chatId}`) || START_BALANCE);
+            // ============================================
+            // API: Get Balance
+            // ============================================
+            if (url.pathname === "/api/balance") {
+                try {
+                    const chatId = url.searchParams.get("chatId");
+                    if (!chatId) {
+                        return json({ error: "Missing chatId parameter" });
+                    }
+                    
+                    const bal = await env.PREDICTIONS.get(`balance:${chatId}`);
+                    const today = new Date().toDateString();
+                    const trades = await env.PREDICTIONS.get(`tradecount:${chatId}:${today}`);
+                    
+                    return json({
+                        balance: parseFloat(bal || START_BALANCE).toFixed(2),
+                        tradesToday: parseInt(trades || "0")
+                    });
+                } catch (e) {
+                    return json({ error: "Balance error: " + e.message });
+                }
+            }
 
-                // 60% win rate for the confluence strategy
-                const isWin = Math.random() < 0.60;
-                const pnl = isWin ? TRADE_SIZE * 0.025 : -TRADE_SIZE * 0.015;
-                balance += pnl;
+            // ============================================
+            // API: Execute Trade
+            // ============================================
+            if (url.pathname === "/api/trade" && request.method === "POST") {
+                try {
+                    const body = await request.json();
+                    const { symbol, signal, price, chatId } = body;
+                    
+                    if (!chatId) {
+                        return json({ error: "Missing chatId" });
+                    }
+                    
+                    const today = new Date().toDateString();
+                    const countKey = `tradecount:${chatId}:${today}`;
+                    const count = parseInt(await env.PREDICTIONS.get(countKey) || "0");
 
-                await env.PREDICTIONS.put(`balance:${chatId}`, balance.toFixed(2));
-                await env.PREDICTIONS.put(countKey, (count + 1).toString(), { expirationTtl: 86400 });
+                    if (count >= 10) {
+                        return json({ error: "Daily limit reached (10 trades)" });
+                    }
 
-                return json({
-                    balance: balance.toFixed(2),
-                    tradesToday: count + 1,
-                    pnl: pnl.toFixed(2)
+                    let balance = parseFloat(await env.PREDICTIONS.get(`balance:${chatId}`) || START_BALANCE);
+
+                    // 60% win rate for the confluence strategy
+                    const isWin = Math.random() < 0.60;
+                    const pnl = isWin ? TRADE_SIZE * 0.025 : -TRADE_SIZE * 0.015;
+                    balance += pnl;
+
+                    await env.PREDICTIONS.put(`balance:${chatId}`, balance.toFixed(2));
+                    await env.PREDICTIONS.put(countKey, (count + 1).toString(), { expirationTtl: 86400 });
+
+                    return json({
+                        balance: balance.toFixed(2),
+                        tradesToday: count + 1,
+                        pnl: pnl.toFixed(2)
+                    });
+                } catch (e) {
+                    return json({ error: "Trade error: " + e.message });
+                }
+            }
+
+            // ============================================
+            // API: Reset Balance
+            // ============================================
+            if (url.pathname === "/api/reset" && request.method === "POST") {
+                try {
+                    const chatId = url.searchParams.get("chatId");
+                    if (!chatId) {
+                        return json({ error: "Missing chatId" });
+                    }
+                    
+                    await env.PREDICTIONS.put(`balance:${chatId}`, START_BALANCE.toString());
+                    
+                    // Also reset today's trade count
+                    const today = new Date().toDateString();
+                    await env.PREDICTIONS.put(`tradecount:${chatId}:${today}`, "0", { expirationTtl: 86400 });
+                    
+                    return json({ ok: true });
+                } catch (e) {
+                    return json({ error: "Reset error: " + e.message });
+                }
+            }
+
+            // ============================================
+            // Root endpoint - health check
+            // ============================================
+            if (request.method === "GET" && url.pathname === "/") {
+                return new Response("Bybit Bot Worker is running! Visit /api/test to test.", {
+                    headers: { ...corsHeaders }
                 });
-            } catch (e) {
-                return json({ error: e.message });
             }
-        }
 
-        // ============================================
-        // API: Reset Balance
-        // ============================================
-        if (url.pathname === "/api/reset" && request.method === "POST") {
-            try {
-                const chatId = url.searchParams.get("chatId");
-                await env.PREDICTIONS.put(`balance:${chatId}`, START_BALANCE.toString());
-                return json({ ok: true });
-            } catch (e) {
-                return json({ error: e.message });
-            }
-        }
+            return new Response("Not found", { 
+                status: 404,
+                headers: { ...corsHeaders }
+            });
 
-        // ============================================
-        // Serve HTML (Optional)
-        // ============================================
-        if (request.method === "GET" && url.pathname === "/") {
-            // For static files, serve from GitHub Pages instead
-            return new Response("Use GitHub Pages for the frontend", { status: 200 });
+        } catch (error) {
+            // Catch-all error handler
+            return new Response(JSON.stringify({ 
+                error: "Worker error: " + error.message 
+            }), {
+                status: 500,
+                headers: { 
+                    "Content-Type": "application/json",
+                    ...corsHeaders 
+                }
+            });
         }
-
-        return new Response("Not found", { status: 404 });
     }
 };

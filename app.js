@@ -2,9 +2,8 @@
 // CONFIGURATION
 // ============================================================
 const CONFIG = {
-    // For Cloudflare Worker, use the worker URL
-    // For local testing, use empty string
-    API_URL: '', // Change to your worker URL after deploy: 'https://bybitbot.your-username.workers.dev'
+    // Your Cloudflare Worker URL
+    API_URL: 'https://bybitbot.aladetimothyolarewaju.workers.dev',
     
     COINS: [
         'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE', 'ADA', 'AVAX', 'DOT', 'LINK',
@@ -79,6 +78,20 @@ async function api(path, method = 'GET', body = null) {
     
     try {
         const res = await fetch(baseUrl + path, opts);
+        
+        // Check if response is OK
+        if (!res.ok) {
+            const text = await res.text();
+            return { error: "HTTP " + res.status + ": " + text };
+        }
+        
+        // Try to parse JSON
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await res.text();
+            return { error: "Unexpected response type: " + text.substring(0, 100) };
+        }
+        
         return await res.json();
     } catch (e) {
         console.error('API error:', e);
@@ -116,6 +129,7 @@ async function loadBalance() {
         if (bal && !bal.error) {
             state.virtualBalance = parseFloat(bal.balance);
             state.tradesToday = bal.tradesToday || 0;
+            updateUI();
         }
     } catch (e) {
         console.log('Backend not ready, using local mode');
@@ -155,15 +169,36 @@ async function scanAll() {
     try {
         const res = await api('/api/scanall', 'POST', { chatId: state.chatId });
         
+        // Check for errors
         if (res.error) {
             showToast('Backend error: ' + res.error, 'error');
             updateStatus('❌ Error');
             state.isScanning = false;
             if (btn) btn.disabled = false;
+            
+            // Show the error in the table
+            const tbody = document.getElementById('marketBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align:center;padding:30px;color:#ff4444;">
+                        ❌ Error: ${res.error}<br>
+                        <span style="color:#666;font-size:12px;">Check console for details</span>
+                    </td>
+                </tr>
+            `;
             return;
         }
 
-        state.marketData = res.data || [];
+        // Check if data exists
+        if (!res.data || !Array.isArray(res.data)) {
+            showToast('No data received from backend', 'warning');
+            updateStatus('⚠️ No data');
+            state.isScanning = false;
+            if (btn) btn.disabled = false;
+            return;
+        }
+
+        state.marketData = res.data;
         state.signals = state.marketData.filter(r => r.signal && r.signal !== 'HOLD');
 
         // Auto-trade high confidence signals
@@ -182,8 +217,9 @@ async function scanAll() {
         updateStatus('✅ Done - ' + state.signals.length + ' signals found');
 
     } catch (e) {
-        showToast('Backend error: ' + e.message, 'error');
+        showToast('Error: ' + e.message, 'error');
         updateStatus('❌ Error');
+        console.error('Scan error:', e);
     }
 
     state.isScanning = false;
@@ -213,7 +249,7 @@ async function executeTrade(signal) {
         symbol: signal.symbol,
         direction: signal.signal,
         entryPrice: signal.price,
-        positionSize: 100, // $100 per trade
+        positionSize: 100,
         tp: signal.tp || null,
         sl: signal.sl || null,
         entryTime: Date.now(),
@@ -559,6 +595,7 @@ function init() {
     console.log('📊 Bybit Smart Bot Pro loaded!');
     console.log('🪙 Monitoring ' + CONFIG.COINS.length + ' coins');
     console.log('💰 Virtual Balance: $' + state.virtualBalance.toFixed(2));
+    console.log('🌐 Worker URL: ' + CONFIG.API_URL);
 }
 
 // Start the app when DOM is ready

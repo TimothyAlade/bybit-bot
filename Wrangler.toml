@@ -5,3 +5,6 @@ compatibility_date = "2024-01-01"
 kv_namespaces = [
   { binding = "PREDICTIONS", id = "0700d89ace064054baa748de9e6827da" }
 ]
+
+[env.production]
+vars = { START_BALANCE = "10000" }
