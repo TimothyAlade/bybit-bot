@@ -5,4 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [[kv_namespaces]]
 binding = "PREDICTIONS"
-id = "PASTE_YOUR_KV_ID_HERE"
+id = "0700d89ace064054baa748de9e6827da"
+
+[triggers]
+crons = ["0 7 *"] # 7:00 UTC = 9:00 AM Lagos time daily

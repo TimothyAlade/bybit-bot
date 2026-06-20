@@ -1,0 +1,4 @@
+body { background: #0a0e27; color: #e0e0e0; font-family: Arial; margin: 0; padding: 20px; }
+.container { max-width: 800px; margin: 0 auto; }
+h1 { color: #00d4ff; }
+#signals { background: #1a1f3a; padding: 20px; border-radius: 10px; margin-top: 20px; }
