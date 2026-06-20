@@ -1,0 +1,13 @@
+# Node
+node_modules/
+.env
+.DS_Store
+
+# Cloudflare
+.wrangler/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
