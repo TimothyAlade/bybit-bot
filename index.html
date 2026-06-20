@@ -1,18 +1,123 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>BybitBot Dashboard</title>
-  <link rel="stylesheet" href="/style.css">
-</head>
-<body>
-  <div class="container">
-    <h1>📊 BybitBot Signals</h1>
-    <p>Live tracking for Telegram bot signals</p>
-    <div id="signals">Loading...</div>
-  </div>
-  <script>
-    // We’ll add KV fetch here next step
-    document.getElementById('signals').innerHTML = "No signals yet. Send BTC to bot on Telegram";
-  </script>
-</body>
-</html>
+<!DOCTYPE html><html><head><title>Bybit Bot v2 Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{background:#0a0a0a;color:#eee;font-family:Arial;padding:20px;max-width:900px;margin:0 auto}
+h1{color:#f0b90b;margin:0 0 10px 0;font-size:26px}
+.subtitle{color:#888;font-size:12px;margin-bottom:15px}
+.stats{display:flex;gap:12px;margin:15px 0;flex-wrap:wrap}
+.stat{background:#1a1a1a;padding:14px 18px;border-radius:8px;border:1px solid #333;min-width:100px}
+.stat b{font-size:20px;display:block}
+.buttons{display:flex;gap:8px;margin:15px 0;flex-wrap:wrap}
+button{background:#f0b90b;border:none;color:#000;padding:12px 20px;border-radius:8px;font-weight:bold;cursor:pointer;font-size:14px}
+button:disabled{background:#444;color:#888;cursor:not-allowed}
+button:hover:not(:disabled){background:#ffd700}
+.signal{border:1px solid #333;padding:14px;margin:8px 0;border-radius:8px;background:#141414;font-size:14px}
+.buy{border-left:4px solid #00ff88}
+.sell{border-left:4px solid #ff4444}
+.hold{border-left:4px solid #ffaa00}
+.win{border-left:4px solid #00ff88;background:#0a1a0a}
+.loss{border-left:4px solid #ff4444;background:#1a0a0a}
+.row{display:flex;justify-content:space-between;margin:5px 0}
+.small{font-size:12px;color:#888}
+#msg{margin:10px 0;padding:10px;border-radius:6px;background:#1a1a1a;display:none}
+</style></head><body>
+<h1>📊 Bybit Bot v2 Dashboard</h1>
+<div class="subtitle">EMA9/21 + RSI14 + Volume + 5m TF | Paper $1 | Max 8 trades/day | Daily 9AM Lagos</div>
+
+<div id="stats" class="stats">
+  <div class="stat">Balance<br><b id="balance">$100.00</b></div>
+  <div class="stat">Trades Today<br><b id="trades">0/8</b></div>
+  <div class="stat">Wins<br><b id="wins" style="color:#0f0">0</b></div>
+  <div class="stat">Loss<br><b id="losses" style="color:#f00">0</b></div>
+  <div class="stat">Winrate<br><b id="winrate">0%</b></div>
+</div>
+
+<div class="buttons">
+  <button onclick="scan('BTC')">BTC</button>
+  <button onclick="scan('ETH')">ETH</button>
+  <button onclick="scan('SOL')">SOL</button>
+  <button onclick="scan('BNB')">BNB</button>
+  <button onclick="scan('DOGE')">DOGE</button>
+  <button onclick="resetDemo()">Reset $100</button>
+</div>
+
+<div id="msg"></div>
+<div id="signals">Loading signals...</div>
+
+<script>
+const chatId = localStorage.getItem('chatId') || 'web_' + Math.random().toString(36).substr(2,9);
+localStorage.setItem('chatId', chatId);
+
+function showMsg(text, type='info') {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.style.display = 'block';
+  el.style.background = type === 'error' ? '#2a1a1a' : '#1a2a1a';
+  setTimeout(() => el.style.display = 'none', 4000);
+}
+
+async function scan(symbol) {
+  const btn = event.target;
+  btn.disabled = true;
+  showMsg(`🔍 Scanning ${symbol}USDT...`);
+  
+  try {
+    const res = await fetch('/api/scan', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({symbol, chatId})
+    });
+    const data = await res.json();
+    
+    if (data.error) showMsg('Error: ' + data.error, 'error');
+    else if (data.message) showMsg(data.message);
+    else if (data.signal) {
+      showMsg(`${symbol}: ${data.signal} @ $${data.price}`);
+    }
+  } catch(e) {
+    showMsg('Network error', 'error');
+  }
+  btn.disabled = false;
+  load();
+}
+
+async function resetDemo() {
+  if(!confirm('Reset balance to $100?')) return;
+  await fetch('/api/reset?chatId=' + chatId, {method: 'POST'});
+  showMsg('Balance reset to $100');
+  load();
+}
+
+async function load(){
+  try {
+    const [sigRes, balRes] = await Promise.all([
+      fetch('/api/signals?chatId=' + chatId),
+      fetch('/api/balance?chatId=' + chatId)
+    ]);
+    const data = await sigRes.json();
+    const bal = await balRes.json();
+
+    document.getElementById('balance').textContent = '$' + bal.balance;
+    document.getElementById('wins').textContent = data.stats.wins;
+    document.getElementById('losses').textContent = data.stats.losses;
+    document.getElementById('winrate').textContent = data.stats.winrate + '%';
+    document.getElementById('trades').textContent = bal.tradesToday + '/8';
+
+    document.getElementById('signals').innerHTML = data.signals.length ? data.signals.map(s=>`
+      <div class="signal ${s.status.toLowerCase().includes('win')?'win':s.status.toLowerCase().includes('loss')?'loss':s.signal.toLowerCase()}">
+        <div class="row"><b>${s.symbol}USDT</b> <span class="small">${new Date(s.time).toLocaleTimeString()}</span></div>
+        <div class="row">Price: $${s.price} | <b>${s.signal}</b></div>
+        ${s.tp ? `<div class="row">TP: $${s.tp} | SL: $${s.sl}</div>` : ''}
+        <div class="row small">${s.reason}</div>
+        <div class="row small">Status: <b>${s.status}</b></div>
+      </div>
+    `).join('') : '<div class="small">No signals yet. Click a coin above to scan.</div>';
+  } catch(e) {
+    document.getElementById('signals').innerHTML = 'Error loading data';
+  }
+}
+
+load();
+setInterval(load, 5000);
+</script>
+</body></html>
